@@ -14,7 +14,7 @@ import aiRoutes from './routes/ai.js';
 import adminAiRoutes from './routes/adminAi.js';
 
 const app = express();
-app.use(cors());
+app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '2mb' }));
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
