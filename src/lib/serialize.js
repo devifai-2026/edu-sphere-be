@@ -67,6 +67,8 @@ export const announcement = (a) => ({
 
 export const banner = (b) => ({ id: String(b._id), title: b.title, subtitle: b.subtitle, cta: b.cta, colors: b.colors, icon: b.icon, imageUrl: b.imageUrl || '', linkType: b.linkType || 'none', linkId: b.linkId || '', linkUrl: b.linkUrl || '' });
 
+export const onboardingSlide = (s) => ({ id: String(s._id), image: s.image || '', title: s.title, body: s.body || '' });
+
 /** Human-readable salary label following naukri-style masking rules. */
 export function salaryLabel(j) {
   if (j.salaryMode === 'masked') return 'Not disclosed';

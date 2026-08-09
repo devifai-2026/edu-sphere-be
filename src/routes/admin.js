@@ -4,6 +4,7 @@ import { College, Stream, Year, Degree, Subject, SubjectEligibility, Chapter, To
 import { Test } from '../models/tests.js';
 import { PYQ } from '../models/pyq.js';
 import { Note } from '../models/notes.js';
+import { OnboardingSlide } from '../models/onboarding.js';
 import { Announcement, Banner, Job, Notification, Faq, ResumeConfig, Application } from '../models/content.js';
 import { Feedback } from '../models/feedback.js';
 import { Group, ChatMessage, Invite, GroupMembershipLog } from '../models/community.js';
@@ -37,6 +38,7 @@ router.use('/videos', crudRouter(Video, { defaultSort: 'order' }));
 router.use('/tests', crudRouter(Test));
 router.use('/pyqs', crudRouter(PYQ, { defaultSort: '-examYear' }));
 router.use('/notes', crudRouter(Note, { defaultSort: 'order' }));
+router.use('/onboarding', crudRouter(OnboardingSlide, { defaultSort: 'order' }));
 router.use('/announcements', crudRouter(Announcement));
 router.use('/banners', crudRouter(Banner, { defaultSort: 'order' }));
 router.use('/jobs', crudRouter(Job));
