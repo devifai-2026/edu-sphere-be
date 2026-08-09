@@ -23,3 +23,12 @@ services:
         sync: false
       - key: IMGBB_API_KEY
         sync: false
+      # Google Cloud — GCS video bucket + Vertex AI (service-account JSON is base64'd, never committed)
+      - key: GCP_PROJECT_ID
+        sync: false
+      - key: GCP_LOCATION
+        sync: false
+      - key: GCS_BUCKET
+        sync: false
+      - key: GCP_SA_JSON_BASE64
+        sync: false

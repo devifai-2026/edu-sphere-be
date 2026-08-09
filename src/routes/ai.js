@@ -8,7 +8,8 @@ import { Router } from 'express';
 import { userAuth } from '../middleware/auth.js';
 import { User } from '../models/user.js';
 import { getAiSettings, LlmLog } from '../models/aiSettings.js';
-import { generateJson } from '../lib/gemini.js';
+import { generateJson } from '../lib/vertex.js';
+import { googleConfigured, getProjectId } from '../lib/googleAuth.js';
 import { extractPdfText } from '../lib/pdf.js';
 
 const router = Router();
@@ -29,9 +30,10 @@ function profileSummary(u, extra = '') {
 
 async function runFeature({ feature, promptKey, userId, buildContent }) {
   const settings = await getAiSettings();
-  const apiKey = settings.geminiApiKey; // stored in DB only
   const systemPrompt = settings.prompts?.[promptKey];
-  const model = settings.model || 'gemini-2.0-flash';
+  const projectId = settings.vertexProjectId || getProjectId();
+  const location = settings.vertexLocation || process.env.GCP_LOCATION || 'us-central1';
+  const model = settings.vertexModel || 'gemini-2.5-flash';
 
   const u = await User.findById(userId).lean();
   if (!u) throw Object.assign(new Error('user not found'), { status: 404 });
@@ -40,8 +42,9 @@ async function runFeature({ feature, promptKey, userId, buildContent }) {
   const started = Date.now();
   const log = { user: userId, feature, model, input: `SYSTEM:\n${systemPrompt}\n\nUSER:\n${userContent}` };
   try {
-    if (!apiKey) throw new Error('AI not configured — set the Gemini API key in admin settings.');
-    const { text, parsed } = await generateJson({ apiKey, model, systemPrompt, userContent });
+    if (!settings.enabled) throw new Error('AI is disabled in admin settings.');
+    if (!projectId || !googleConfigured()) throw new Error('AI not configured — set the Vertex project and service-account credentials.');
+    const { text, parsed } = await generateJson({ projectId, location, model, systemPrompt, userContent });
     log.output = text;
     log.parsed = parsed;
     log.status = parsed ? 'ok' : 'error';

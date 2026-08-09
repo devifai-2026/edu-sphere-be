@@ -71,7 +71,10 @@ const videoSchema = new Schema(
     topicId: { type: Schema.Types.ObjectId, ref: 'Topic', required: true, index: true },
     subjectId: { type: Schema.Types.ObjectId, ref: 'Subject', required: true, index: true }, // denormalized for findVideo
     title: { type: String, required: true },
-    youtubeId: { type: String, required: true },
+    sourceType: { type: String, enum: ['youtube', 'file'], default: 'youtube' },
+    // Required only for YouTube videos; file videos use videoUrl instead.
+    youtubeId: { type: String, default: '', required: function () { return this.sourceType === 'youtube'; } },
+    videoUrl: { type: String, default: '' }, // GCS object URL or external MP4 URL (sourceType 'file')
     duration: { type: String, default: '' },
     speedup: { type: Boolean, default: false },
     noteUrl: { type: String, default: '' },

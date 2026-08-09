@@ -11,8 +11,9 @@
 import { Router } from 'express';
 import express from 'express';
 import multer from 'multer';
-import { anyAuth } from '../middleware/auth.js';
+import { anyAuth, adminAuth } from '../middleware/auth.js';
 import { uploadImage, uploadsConfigured } from '../lib/uploads.js';
+import { signUploadUrl, buildObjectKey, gcsConfigured } from '../lib/gcs.js';
 
 const router = Router();
 
@@ -66,6 +67,26 @@ router.post('/base64', anyAuth, express.json({ limit: '20mb' }), async (req, res
   } catch (e) {
     console.error('[uploads/base64] failed:', e?.message || e);
     res.status(502).json({ error: 'upload failed' });
+  }
+});
+
+/**
+ * Sign a direct-to-GCS upload for a lecture video (admin only). The browser then
+ * PUTs the file straight to GCS using `uploadUrl`, bypassing this server entirely.
+ */
+router.post('/gcs-sign', adminAuth, express.json(), async (req, res) => {
+  if (!gcsConfigured()) return res.status(503).json({ error: 'GCS not configured' });
+  const { filename, contentType } = req.body || {};
+  if (!contentType || !String(contentType).startsWith('video/')) {
+    return res.status(400).json({ error: 'contentType must be a video/* type' });
+  }
+  try {
+    const key = buildObjectKey(filename);
+    const out = await signUploadUrl({ contentType, key });
+    res.status(201).json(out); // { uploadUrl, objectUrl, key, headers }
+  } catch (e) {
+    console.error('[uploads/gcs-sign] failed:', e?.message || e);
+    res.status(502).json({ error: 'could not sign upload url' });
   }
 });
 

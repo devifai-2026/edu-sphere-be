@@ -8,8 +8,10 @@ export const subject = (s) => ({ id: s.slug, title: s.title, icon: s.icon, color
 export const video = (v) => ({
   id: String(v._id),
   title: v.title,
-  youtubeId: v.youtubeId,
+  sourceType: v.sourceType || 'youtube', // legacy rows default to youtube
+  youtubeId: v.youtubeId || '',
   duration: v.duration,
+  ...(v.videoUrl ? { videoUrl: v.videoUrl } : {}),
   ...(v.speedup ? { speedup: true } : {}),
   ...(v.noteUrl ? { noteUrl: v.noteUrl } : {}),
   ...(v.noteLabel ? { noteLabel: v.noteLabel } : {}),
@@ -45,6 +47,13 @@ export const pyq = (p) => ({
   semester: p.semester,
   pages: p.pages,
   pdfUrl: p.pdfUrl,
+});
+
+export const note = (n) => ({
+  id: String(n._id),
+  title: n.title,
+  pdfUrl: n.pdfUrl,
+  pages: n.pages,
 });
 
 export const announcement = (a) => ({

@@ -6,54 +6,48 @@
  */
 import { Router } from 'express';
 import { AiSettings, getAiSettings, DEFAULT_PROMPTS, LlmLog } from '../models/aiSettings.js';
+import { googleConfigured, getProjectId } from '../lib/googleAuth.js';
 
 const router = Router();
 
-/** Mask the API key so we never send the full secret to the browser. */
-function maskKey(k) {
-  if (!k) return '';
-  if (k.length <= 8) return '••••';
-  return `${k.slice(0, 4)}••••${k.slice(-4)}`;
+/** Where the Vertex service-account credentials come from (never the value). */
+function credentialSource() {
+  if (process.env.GOOGLE_APPLICATION_CREDENTIALS) return 'env-file';
+  if (process.env.GCP_SA_JSON_BASE64) return 'env-base64';
+  return 'none';
+}
+
+function settingsPayload(s) {
+  return {
+    provider: 'vertex',
+    vertexProjectId: s.vertexProjectId || getProjectId() || '',
+    vertexLocation: s.vertexLocation || process.env.GCP_LOCATION || 'us-central1',
+    vertexModel: s.vertexModel || 'gemini-2.5-flash',
+    enabled: s.enabled,
+    hasCredentials: googleConfigured(),
+    credentialSource: credentialSource(),
+    prompts: s.prompts,
+    defaults: DEFAULT_PROMPTS,
+  };
 }
 
 router.get('/ai/settings', async (_req, res) => {
-  const s = await getAiSettings();
-  res.json({
-    provider: s.provider,
-    model: s.model,
-    enabled: s.enabled,
-    hasKey: Boolean(s.geminiApiKey),
-    keyMasked: maskKey(s.geminiApiKey),
-    keySource: s.geminiApiKey ? 'saved in DB' : 'none',
-    prompts: s.prompts,
-    defaults: DEFAULT_PROMPTS,
-  });
+  res.json(settingsPayload(await getAiSettings()));
 });
 
 router.put('/ai/settings', async (req, res) => {
   const s = await getAiSettings();
-  const { geminiApiKey, model, enabled, prompts } = req.body || {};
-  // Only overwrite the key when a non-empty new value is provided.
-  if (typeof geminiApiKey === 'string' && geminiApiKey.trim()) s.geminiApiKey = geminiApiKey.trim();
-  if (typeof model === 'string' && model) s.model = model;
+  const { vertexProjectId, vertexLocation, vertexModel, enabled, prompts } = req.body || {};
+  if (typeof vertexProjectId === 'string') s.vertexProjectId = vertexProjectId.trim();
+  if (typeof vertexLocation === 'string' && vertexLocation.trim()) s.vertexLocation = vertexLocation.trim();
+  if (typeof vertexModel === 'string' && vertexModel.trim()) s.vertexModel = vertexModel.trim();
   if (typeof enabled === 'boolean') s.enabled = enabled;
   if (prompts && typeof prompts === 'object') {
     if (typeof prompts.atsScore === 'string') s.prompts.atsScore = prompts.atsScore;
     if (typeof prompts.placementReadiness === 'string') s.prompts.placementReadiness = prompts.placementReadiness;
   }
   await s.save();
-  res.json({
-    provider: s.provider, model: s.model, enabled: s.enabled,
-    hasKey: Boolean(s.geminiApiKey), keyMasked: maskKey(s.geminiApiKey),
-    prompts: s.prompts, defaults: DEFAULT_PROMPTS,
-  });
-});
-
-router.delete('/ai/settings/key', async (_req, res) => {
-  const s = await getAiSettings();
-  s.geminiApiKey = '';
-  await s.save();
-  res.json({ ok: true });
+  res.json(settingsPayload(s));
 });
 
 router.get('/ai/logs', async (req, res) => {

@@ -43,8 +43,13 @@ Rules: provide 3-5 readiness areas; base each score on evidence in the profile; 
 const aiSettingsSchema = new Schema(
   {
     key: { type: String, default: 'singleton', unique: true },
-    provider: { type: String, default: 'gemini' },
-    geminiApiKey: { type: String, default: '' }, // stored server-side only, never serialized to clients
+    provider: { type: String, default: 'vertex' },
+    // Vertex AI config — credentials come from the service account (env), not here.
+    vertexProjectId: { type: String, default: '' },
+    vertexLocation: { type: String, default: 'us-central1' },
+    vertexModel: { type: String, default: 'gemini-2.5-flash' },
+    // Legacy AI-Studio fields (kept to avoid data loss; no longer read).
+    geminiApiKey: { type: String, default: '' },
     model: { type: String, default: 'gemini-2.0-flash' },
     prompts: {
       atsScore: { type: String, default: DEFAULT_PROMPTS.atsScore },

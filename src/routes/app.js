@@ -3,6 +3,7 @@ import { PUBLIC_FILTER } from '../models/publishable.js';
 import { College, Stream, Year, Degree, Subject, SubjectEligibility, Chapter, Topic, Video } from '../models/catalog.js';
 import { Test } from '../models/tests.js';
 import { PYQ } from '../models/pyq.js';
+import { Note } from '../models/notes.js';
 import { Announcement, Banner, Job, Notification, Faq, ResumeConfig, Application } from '../models/content.js';
 import { Feedback } from '../models/feedback.js';
 import { TestAttempt } from '../models/testAttempt.js';
@@ -95,6 +96,12 @@ router.get('/subjects/:slug/pyqs', async (req, res) => {
   if (!subject) return res.json([]);
   const pyqs = await PYQ.find({ subjectId: subject._id, ...PUBLIC_FILTER }).sort('-examYear').lean();
   res.json(pyqs.map(S.pyq));
+});
+
+/* ---------- getNotes(subjectSlug) — first-class subject notes ---------- */
+router.get('/subjects/:slug/notes', async (req, res) => {
+  const notes = await Note.find({ subjectSlug: req.params.slug, ...PUBLIC_FILTER }).sort('order').lean();
+  res.json(notes.map(S.note));
 });
 
 /* ---------- eligibleTests(year, stream) ---------- */
