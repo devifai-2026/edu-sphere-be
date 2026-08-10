@@ -44,8 +44,17 @@ const jobSchema = new Schema(
     type: { type: String, enum: ['Internship', 'Full-time'], default: 'Internship' },
     // Salary — naukri-style: explicit range OR masked ("not disclosed") OR unspecified.
     salaryMode: { type: String, enum: ['range', 'masked', 'unspecified'], default: 'range' },
-    salaryMin: { type: Number, default: 0 },
-    salaryMax: { type: Number, default: 0 },
+    salaryMin: { type: Number, default: 0, min: 0 },
+    salaryMax: {
+      type: Number,
+      default: 0,
+      min: 0,
+      validate: {
+        // Only meaningful in 'range' mode; masked/unspecified ignore both fields.
+        validator: function (v) { return this.salaryMode !== 'range' || v >= (this.salaryMin || 0); },
+        message: 'Salary max must be greater than or equal to salary min',
+      },
+    },
     salaryUnit: { type: String, enum: ['per month', 'per year', 'LPA', 'stipend/mo'], default: 'LPA' },
     stipend: { type: String, default: '' }, // legacy free-text fallback
     location: { type: String, default: '' },
@@ -89,7 +98,12 @@ const notificationSchema = new Schema(
     title: { type: String, required: true },
     body: { type: String, default: '' },
     icon: { type: String, default: 'notifications' },
-    unread: { type: Boolean, default: true },
+    unread: { type: Boolean, default: true }, // admin-set initial state at broadcast time
+    // Per-user read receipts — a broadcast notification (userId: null) is shared
+    // across every student, so "read" can't live as a single flag on the
+    // notification itself (one user opening it would mark it read for
+    // everyone). readBy tracks who has actually seen it.
+    readBy: [{ type: Schema.Types.ObjectId, ref: 'User' }],
     // Deep-link target inside the app.
     linkType: { type: String, enum: ['none', 'job', 'announcement', 'subject', 'test', 'screen', 'url'], default: 'none' },
     linkId: { type: String, default: '' },

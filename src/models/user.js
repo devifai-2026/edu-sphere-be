@@ -32,6 +32,7 @@ const userSchema = new Schema(
     },
     projects: { type: [{ title: String, meta: String, stars: Number, icon: String, imageUrl: String, githubUrl: String }], default: [] },
     certificates: { type: [{ title: String, issuer: String, year: String, icon: String, imageUrl: String }], default: [] },
+    savedJobIds: { type: [{ type: Schema.Types.ObjectId, ref: 'Job' }], default: [] }, // bookmarked jobs
     disabled: { type: Boolean, default: false }, // admin soft-disable
     lastActiveAt: { type: Date, default: Date.now },
   },

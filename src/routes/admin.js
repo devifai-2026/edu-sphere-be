@@ -20,7 +20,12 @@ const router = Router();
 function refRouter(Model) {
   const r = Router();
   r.get('/', async (_req, res) => res.json(await Model.find().sort('order name').lean()));
-  r.post('/', async (req, res) => res.status(201).json(await Model.create(req.body || {})));
+  r.post('/', async (req, res) => {
+    if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
+      return res.status(400).json({ error: 'request body must be a JSON object' });
+    }
+    res.status(201).json(await Model.create(req.body));
+  });
   r.put('/:id', async (req, res) => res.json(await Model.findByIdAndUpdate(req.params.id, { $set: req.body }, { new: true })));
   r.delete('/:id', async (req, res) => { await Model.findByIdAndDelete(req.params.id); res.json({ ok: true }); });
   return r;
@@ -84,12 +89,13 @@ community.delete('/chat/:id', async (req, res) => {
 });
 // Admin posts to a group — may include an image (students cannot).
 community.post('/chat', async (req, res) => {
-  const { groupId, text, imageUrl } = req.body || {};
+  const { groupId, imageUrl } = req.body || {};
+  const text = String(req.body?.text || '').slice(0, 2000);
   if (!groupId) return res.status(400).json({ error: 'groupId required' });
   if (!text && !imageUrl) return res.status(400).json({ error: 'text or imageUrl required' });
   const msg = await ChatMessage.create({
     groupId, fromAdmin: true, senderName: 'Admin',
-    kind: imageUrl ? 'image' : 'text', text: text || '', imageUrl: imageUrl || '',
+    kind: imageUrl ? 'image' : 'text', text, imageUrl: imageUrl || '',
   });
   await Group.updateOne({ _id: groupId }, { $set: { lastMsg: text ? text.slice(0, 80) : '📷 Photo' } });
   res.status(201).json({ id: String(msg._id), ok: true });
@@ -160,6 +166,10 @@ users.delete('/:id', async (req, res) => {
   const u = await User.findById(id).lean();
   if (!u) return res.status(404).json({ error: 'not found' });
   const oid = u._id;
+  // Community group membership wasn't in this cascade — a deleted user's id
+  // stayed in every Group.memberIds array indefinitely (only masked because
+  // the members-list endpoint silently drops unresolvable ids).
+  const affectedGroups = await Group.find({ memberIds: oid }).select('_id').lean();
   await Promise.all([
     Application.deleteMany({ user: oid }),
     Feedback.deleteMany({ user: oid }),
@@ -169,7 +179,12 @@ users.delete('/:id', async (req, res) => {
     ChatMessage.deleteMany({ senderId: oid }),
     Invite.deleteMany({ fromUserId: oid }),
     LlmLog.deleteMany({ user: oid }),
+    Group.updateMany({ memberIds: oid }, { $pull: { memberIds: oid } }),
   ]);
+  await Promise.all(affectedGroups.map(async (g) => {
+    const fresh = await Group.findById(g._id).select('memberIds').lean();
+    await Group.updateOne({ _id: g._id }, { $set: { members: (fresh?.memberIds || []).length } });
+  }));
   await User.deleteOne({ _id: oid });
   res.json({ ok: true, deleted: true });
 });

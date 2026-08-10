@@ -9,7 +9,7 @@ import { getGoogleAuth } from './googleAuth.js';
 /**
  * @returns {Promise<{ text: string, parsed: any|null }>}
  */
-export async function generateJson({ projectId, location = 'us-central1', model, systemPrompt, userContent }) {
+export async function generateJson({ projectId, location = 'us-central1', model, systemPrompt, userContent, imageParts = [] }) {
   if (!projectId) throw new Error('vertex: missing GCP project id');
   if (!model) throw new Error('vertex: missing model');
 
@@ -21,9 +21,15 @@ export async function generateJson({ projectId, location = 'us-central1', model,
     `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}` +
     `/locations/${location}/publishers/google/models/${encodeURIComponent(model)}:generateContent`;
 
+  // imageParts lets callers attach inline images (e.g. a resume screenshot the
+  // model can read directly) alongside the text prompt — Gemini is multimodal.
+  const parts = [
+    { text: userContent },
+    ...imageParts.map((p) => ({ inline_data: { mime_type: p.mimeType, data: p.data } })),
+  ];
   const body = {
     system_instruction: { parts: [{ text: systemPrompt }] },
-    contents: [{ role: 'user', parts: [{ text: userContent }] }],
+    contents: [{ role: 'user', parts }],
     generationConfig: {
       temperature: 0.4,
       responseMimeType: 'application/json',

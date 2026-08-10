@@ -74,7 +74,8 @@ const videoSchema = new Schema(
     sourceType: { type: String, enum: ['youtube', 'file'], default: 'youtube' },
     // Required only for YouTube videos; file videos use videoUrl instead.
     youtubeId: { type: String, default: '', required: function () { return this.sourceType === 'youtube'; } },
-    videoUrl: { type: String, default: '' }, // GCS object URL or external MP4 URL (sourceType 'file')
+    // GCS object URL or external MP4 URL. Required only for 'file' videos, mirroring youtubeId above.
+    videoUrl: { type: String, default: '', required: function () { return this.sourceType === 'file'; } },
     duration: { type: String, default: '' },
     speedup: { type: Boolean, default: false },
     noteUrl: { type: String, default: '' },

@@ -24,10 +24,10 @@ function ensureCloudinary() {
 let cloudinaryReady = false;
 
 /** Upload to Cloudinary from a Buffer. Resolves to { url, publicId }. */
-function uploadToCloudinary(buffer, { folder = 'edusphere', resourceType = 'auto' } = {}) {
+function uploadToCloudinary(buffer, { folder = 'edusphere', resourceType = 'auto', format } = {}) {
   return new Promise((resolve, reject) => {
     const stream = cloudinary.uploader.upload_stream(
-      { folder, resource_type: resourceType },
+      { folder, resource_type: resourceType, ...(format ? { format } : {}) },
       (err, result) => {
         if (err || !result) return reject(err || new Error('cloudinary: empty result'));
         resolve({ url: result.secure_url, publicId: result.public_id });

@@ -12,10 +12,10 @@ const descriptiveSchema = new Schema(
   { _id: true }
 );
 
-/** Unified question — supports MCQ (with optional image prompt) and coding. */
+/** Unified question — supports MCQ, coding, and descriptive (with optional image prompt). */
 const questionSchema = new Schema(
   {
-    kind: { type: String, enum: ['mcq', 'coding'], default: 'mcq' },
+    kind: { type: String, enum: ['mcq', 'coding', 'descriptive'], default: 'mcq' },
     prompt: { type: String, default: '' },
     imageUrl: { type: String, default: '' }, // optional image prompt
     // MCQ
@@ -25,6 +25,8 @@ const questionSchema = new Schema(
     starterCode: { type: String, default: '' },
     language: { type: String, default: '' },
     answer: { type: String, default: '' },
+    // Descriptive
+    maxWords: { type: Number, default: 0 },
   },
   { _id: true }
 );
@@ -35,7 +37,7 @@ const testSchema = new Schema(
     type: { type: String, enum: ['mcq', 'descriptive', 'coding', 'mixed'], required: true },
     streamId: { type: Schema.Types.ObjectId, ref: 'Stream', required: true, index: true },
     yearId: { type: Schema.Types.ObjectId, ref: 'Year', required: true, index: true },
-    durationMin: { type: Number, default: 30 },
+    durationMin: { type: Number, default: 30, min: 1, max: 480 }, // 1 min .. 8h — sane bounds, not a real constraint
     icon: { type: String, default: 'flash' },
     colors: { type: [String], validate: (v) => v.length === 2 },
     questions: [questionSchema], // new unified questions

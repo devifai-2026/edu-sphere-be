@@ -13,7 +13,37 @@ import express from 'express';
 import multer from 'multer';
 import { anyAuth, adminAuth } from '../middleware/auth.js';
 import { uploadImage, uploadsConfigured } from '../lib/uploads.js';
-import { signUploadUrl, buildObjectKey, gcsConfigured } from '../lib/gcs.js';
+import { signUploadUrl, buildObjectKey, gcsConfigured, uploadBuffer } from '../lib/gcs.js';
+import { isAllowedUpload, sniffType } from '../lib/fileSniff.js';
+
+// This Cloudinary account has its default "PDF and ZIP files" delivery
+// restriction on: a URL resolving to a .pdf/.zip extension 401s regardless of
+// resource_type ('image' or 'raw' — confirmed both). That meant every
+// note/PYQ PDF uploaded through this endpoint was silently unopenable for
+// students. GCS (already used for lecture videos, confirmed publicly
+// readable) has no such restriction, so non-image files go there instead;
+// Cloudinary stays for actual images.
+const RAW_CONTENT_TYPES = {
+  'application/pdf': 'application/pdf',
+  'application/msword': 'application/msword',
+  'application/zip': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+};
+
+async function storeUpload(buffer, { folder }) {
+  const type = sniffType(buffer);
+  if (type?.startsWith('image/')) {
+    return uploadImage(buffer, { folder, resourceType: 'auto' });
+  }
+  if (gcsConfigured()) {
+    const ext = type?.split('/').pop() || 'bin';
+    const key = buildObjectKey(`file.${ext}`, 'docs');
+    const url = await uploadBuffer(buffer, { key, contentType: RAW_CONTENT_TYPES[type] || 'application/octet-stream' });
+    return { url, provider: 'gcs', publicId: key };
+  }
+  // No GCS configured — fall back to Cloudinary raw without an explicit
+  // extension, which at least avoids the 401 (content-type won't be exact).
+  return uploadImage(buffer, { folder, resourceType: 'raw' });
+}
 
 const router = Router();
 
@@ -35,9 +65,14 @@ router.post('/', anyAuth, upload.single('file'), async (req, res) => {
   if (!req.file?.buffer) {
     return res.status(400).json({ error: 'no file provided (field name must be "file")' });
   }
+  // The client-declared mimetype (checked by multer's fileFilter) is trivial
+  // to spoof — confirm the actual bytes are a type we intend to host.
+  if (!isAllowedUpload(req.file.buffer)) {
+    return res.status(400).json({ error: 'file content does not match an allowed image/PDF/Word type' });
+  }
   try {
     const folder = req.admin ? 'edusphere/content' : 'edusphere/users';
-    const result = await uploadImage(req.file.buffer, { folder });
+    const result = await storeUpload(req.file.buffer, { folder });
     res.status(201).json(result); // { url, provider, publicId }
   } catch (e) {
     console.error('[uploads] failed:', e?.message || e);
@@ -60,9 +95,13 @@ router.post('/base64', anyAuth, express.json({ limit: '20mb' }), async (req, res
     return res.status(400).json({ error: 'invalid base64' });
   }
   if (!buffer.length) return res.status(400).json({ error: 'empty file' });
+  // This path previously did zero type-checking — verify the actual bytes.
+  if (!isAllowedUpload(buffer)) {
+    return res.status(400).json({ error: 'file content does not match an allowed image/PDF/Word type' });
+  }
   try {
     const folder = req.admin ? 'edusphere/content' : 'edusphere/users';
-    const result = await uploadImage(buffer, { folder });
+    const result = await storeUpload(buffer, { folder });
     res.status(201).json(result);
   } catch (e) {
     console.error('[uploads/base64] failed:', e?.message || e);

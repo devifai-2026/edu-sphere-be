@@ -2,22 +2,44 @@
  * Serializers — reshape Mongoose docs into the exact shapes the RN app already
  * expects (see src/data/*.ts), so screens don't have to change.
  */
+import { signReadUrl, keyFromPublicUrl, gcsConfigured } from './gcs.js';
 
 export const subject = (s) => ({ id: s.slug, title: s.title, icon: s.icon, colors: s.colors });
 
-export const video = (v) => ({
+/**
+ * Uploaded ("file") lecture videos are re-signed to a short-lived GET URL on
+ * every read instead of handing out the permanent public objectUrl — so the
+ * link a student's app receives goes stale rather than being forever
+ * re-shareable. YouTube-sourced videos are untouched (YouTube already hosts
+ * and protects that content). Falls back to the stored URL unchanged for
+ * externally-pasted video URLs (not one of our own GCS objects) or if GCS
+ * isn't configured / signing fails, so playback never hard-breaks.
+ */
+async function resolveVideoUrl(v) {
+  if (v.sourceType !== 'file' || !v.videoUrl || !gcsConfigured()) return v.videoUrl;
+  const key = keyFromPublicUrl(v.videoUrl);
+  if (!key) return v.videoUrl; // an externally-pasted URL, not one of ours
+  try {
+    return await signReadUrl(key);
+  } catch (e) {
+    console.error('[serialize] signReadUrl failed, falling back to stored url:', e?.message || e);
+    return v.videoUrl;
+  }
+}
+
+export const video = async (v) => ({
   id: String(v._id),
   title: v.title,
   sourceType: v.sourceType || 'youtube', // legacy rows default to youtube
   youtubeId: v.youtubeId || '',
   duration: v.duration,
-  ...(v.videoUrl ? { videoUrl: v.videoUrl } : {}),
+  ...(v.videoUrl ? { videoUrl: await resolveVideoUrl(v) } : {}),
   ...(v.speedup ? { speedup: true } : {}),
   ...(v.noteUrl ? { noteUrl: v.noteUrl } : {}),
   ...(v.noteLabel ? { noteLabel: v.noteLabel } : {}),
 });
 
-export const topic = (t, videos) => ({ id: String(t._id), title: t.title, videos: videos.map(video) });
+export const topic = async (t, videos) => ({ id: String(t._id), title: t.title, videos: await Promise.all(videos.map(video)) });
 
 export const chapter = (ch, subjectSlug, topics) => ({
   id: String(ch._id),
@@ -26,19 +48,48 @@ export const chapter = (ch, subjectSlug, topics) => ({
   topics,
 });
 
-export const test = (t, streamName, yearName) => ({
-  id: String(t._id),
-  title: t.title,
-  type: t.type,
-  stream: streamName,
-  year: yearName,
-  durationMin: t.durationMin,
-  attempts: t.attempts ?? 0,
-  icon: t.icon,
-  colors: t.colors,
-  ...(t.mcq?.length ? { mcq: t.mcq.map((q) => ({ id: String(q._id), prompt: q.prompt, options: q.options, correct: q.correct })) } : {}),
-  ...(t.descriptive?.length ? { descriptive: t.descriptive.map((q) => ({ id: String(q._id), prompt: q.prompt, maxWords: q.maxWords })) } : {}),
-});
+/**
+ * The admin panel only has a UI for the unified `questions[]` field (see
+ * learn-admin's QuestionsEditor) — it never writes the legacy `mcq`/`descriptive`
+ * arrays. Resolve the effective MCQ answer key from `questions[]` first, falling
+ * back to the legacy field so any test seeded directly against the old shape
+ * still works. Exported so the submit route can grade against the same source
+ * of truth this serializer advertises.
+ */
+export function resolveMcq(t) {
+  const qs = Array.isArray(t.questions) ? t.questions : [];
+  const unified = qs.filter((q) => (q.kind || 'mcq') === 'mcq');
+  return unified.length ? unified : (Array.isArray(t.mcq) ? t.mcq : []);
+}
+
+function resolveDescriptive(t) {
+  const qs = Array.isArray(t.questions) ? t.questions : [];
+  const unified = qs.filter((q) => q.kind === 'descriptive');
+  return unified.length ? unified : (Array.isArray(t.descriptive) ? t.descriptive : []);
+}
+
+export const test = (t, streamName, yearName) => {
+  const mcqSource = resolveMcq(t);
+  const codingSource = (Array.isArray(t.questions) ? t.questions : []).filter((q) => q.kind === 'coding');
+  const descriptiveSource = resolveDescriptive(t);
+  return {
+    id: String(t._id),
+    title: t.title,
+    type: t.type,
+    stream: streamName,
+    year: yearName,
+    durationMin: t.durationMin,
+    attempts: t.attempts ?? 0,
+    icon: t.icon,
+    colors: t.colors,
+    // NOTE: never include `correct`/`answer` here — this payload is served
+    // pre-attempt (GET /tests, GET /tests/:id are unauthenticated) and
+    // grading happens server-side in POST /tests/:id/submit.
+    ...(mcqSource.length ? { mcq: mcqSource.map((q) => ({ id: String(q._id), prompt: q.prompt, options: q.options, ...(q.imageUrl ? { imageUrl: q.imageUrl } : {}) })) } : {}),
+    ...(descriptiveSource.length ? { descriptive: descriptiveSource.map((q) => ({ id: String(q._id), prompt: q.prompt, maxWords: q.maxWords })) } : {}),
+    ...(codingSource.length ? { coding: codingSource.map((q) => ({ id: String(q._id), prompt: q.prompt, ...(q.imageUrl ? { imageUrl: q.imageUrl } : {}), starterCode: q.starterCode, language: q.language })) } : {}),
+  };
+};
 
 export const pyq = (p) => ({
   id: String(p._id),
@@ -105,14 +156,17 @@ export const job = (j) => ({
   logoColor: j.logoColor,
 });
 
-export const notification = (n) => ({
+// userId is required so a broadcast notification's read state can be computed
+// per-viewer instead of trusting the shared `unread` flag directly (see the
+// readBy comment on the schema).
+export const notification = (n, userId) => ({
   id: String(n._id),
   category: n.category,
   title: n.title,
   body: n.body,
   time: n.createdAt ? timeAgo(n.createdAt) : '',
   icon: n.icon,
-  unread: n.unread,
+  unread: n.unread && !(n.readBy || []).some((id) => String(id) === String(userId)),
   linkType: n.linkType || 'none',
   linkId: n.linkId || '',
 });
@@ -144,7 +198,6 @@ export const userProfile = (u) => ({
   year: u.year,
   subjects: u.subjects,
   skills: u.skills,
-  hasResume: u.hasResume,
   email: u.email || '',
   linkedinUrl: u.linkedinUrl || '',
   cvUrl: u.cvUrl || '',
@@ -155,6 +208,7 @@ export const userProfile = (u) => ({
   readiness: u.readiness || [],
   projects: (u.projects || []).map((p) => ({ id: String(p._id), title: p.title, meta: p.meta, stars: p.stars, icon: p.icon, imageUrl: p.imageUrl || '', githubUrl: p.githubUrl || '' })),
   certificates: (u.certificates || []).map((c) => ({ id: String(c._id), title: c.title, issuer: c.issuer, year: c.year, icon: c.icon, imageUrl: c.imageUrl || '' })),
+  savedJobIds: (u.savedJobIds || []).map(String),
 });
 
 /** Aggregate stats (rank computed against the whole user pool). */

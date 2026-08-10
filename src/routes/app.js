@@ -76,7 +76,7 @@ router.get('/subjects/:slug/chapters', async (req, res) => {
     const topicOut = [];
     for (const t of topics) {
       const videos = await Video.find({ topicId: t._id, ...PUBLIC_FILTER }).sort('order').lean();
-      topicOut.push(S.topic(t, videos));
+      topicOut.push(await S.topic(t, videos));
     }
     out.push(S.chapter(ch, subject.slug, topicOut));
   }
@@ -88,7 +88,7 @@ router.get('/videos/:id', async (req, res) => {
   const v = await Video.findOne({ _id: req.params.id, ...PUBLIC_FILTER }).lean();
   if (!v) return res.status(404).json({ error: 'not found' });
   const subject = await Subject.findById(v.subjectId).lean();
-  res.json({ video: S.video(v), subjectId: subject?.slug ?? '' });
+  res.json({ video: await S.video(v), subjectId: subject?.slug ?? '' });
 });
 
 /* ---------- getPYQs(subjectSlug) ---------- */
@@ -217,7 +217,7 @@ router.post('/groups/:id/messages', userAuth, async (req, res) => {
   if (!g) return res.status(404).json({ error: 'group not found' });
   const isMember = (g.memberIds || []).some((m) => String(m) === String(req.user.sub));
   if (!isMember) return res.status(403).json({ error: 'join the group to post' });
-  const text = String(req.body?.text || '').trim();
+  const text = String(req.body?.text || '').trim().slice(0, 2000);
   if (!text) return res.status(400).json({ error: 'text required' });
   const u = await User.findById(req.user.sub).select('firstName lastName').lean();
   const msg = await ChatMessage.create({
@@ -246,7 +246,22 @@ router.get('/notifications', userAuth, async (req, res) => {
   const n = await Notification.find({ ...PUBLIC_FILTER, $or: [{ userId: null }, { userId: req.user.sub }] })
     .sort('-createdAt')
     .lean();
-  res.json(n.map(S.notification));
+  res.json(n.map((doc) => S.notification(doc, req.user.sub)));
+});
+
+/** Mark one notification read for the current user (doesn't affect other viewers of a broadcast). */
+router.patch('/notifications/:id/read', userAuth, async (req, res) => {
+  await Notification.updateOne({ _id: req.params.id }, { $addToSet: { readBy: req.user.sub } });
+  res.json({ ok: true });
+});
+
+/** Mark every notification currently visible to this user as read. */
+router.patch('/notifications/read-all', userAuth, async (req, res) => {
+  await Notification.updateMany(
+    { ...PUBLIC_FILTER, $or: [{ userId: null }, { userId: req.user.sub }] },
+    { $addToSet: { readBy: req.user.sub } }
+  );
+  res.json({ ok: true });
 });
 
 /* ---------- current user ---------- */
@@ -343,6 +358,20 @@ router.put('/users/me/cv', userAuth, async (req, res) => {
   await reloadProfile(req.user.sub, res);
 });
 
+/* ---------- Save/bookmark a job (the bookmark icon on job detail was purely decorative — no onPress at all) ---------- */
+router.post('/jobs/:id/save', userAuth, async (req, res) => {
+  const job = await Job.findById(req.params.id).lean();
+  if (!job) return res.status(404).json({ error: 'job not found' });
+  await User.updateOne({ _id: req.user.sub }, { $addToSet: { savedJobIds: job._id } });
+  const u = await User.findById(req.user.sub).lean();
+  res.json(S.userProfile(u));
+});
+router.delete('/jobs/:id/save', userAuth, async (req, res) => {
+  await User.updateOne({ _id: req.user.sub }, { $pull: { savedJobIds: req.params.id } });
+  const u = await User.findById(req.user.sub).lean();
+  res.json(S.userProfile(u));
+});
+
 /* ---------- Job apply ---------- */
 router.post('/jobs/:id/apply', userAuth, async (req, res) => {
   const job = await Job.findById(req.params.id).lean();
@@ -376,10 +405,19 @@ router.get('/users/me/applications', userAuth, async (req, res) => {
 router.post('/tests/:id/submit', userAuth, async (req, res) => {
   const test = await Test.findById(req.params.id).lean();
   if (!test) return res.status(404).json({ error: 'test not found' });
-  const answers = Array.isArray(req.body?.answers) ? req.body.answers : [];
+  const mcq = S.resolveMcq(test);
+  const submitted = Array.isArray(req.body?.answers) ? req.body.answers : [];
   const durationSec = Number(req.body?.durationSec) || 0;
-  const total = answers.length || 0;
-  const score = answers.filter((a) => a?.correct).length;
+  // Never trust a client-supplied `correct` flag — recompute against the
+  // stored answer key so a crafted submission can't fake a perfect score.
+  const answers = submitted.map((a) => {
+    const questionIndex = Number(a?.questionIndex);
+    const selected = Number(a?.selected);
+    const q = mcq[questionIndex];
+    return { questionIndex, selected, correct: !!q && q.correct === selected };
+  });
+  const total = mcq.length || answers.length;
+  const score = answers.filter((a) => a.correct).length;
   const percent = total ? Math.round((score / total) * 100) : 0;
   await TestAttempt.create({
     test: test._id, testTitle: test.title, user: req.user.sub,

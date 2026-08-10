@@ -10,7 +10,7 @@ import { User } from '../models/user.js';
 import { getAiSettings, LlmLog } from '../models/aiSettings.js';
 import { generateJson } from '../lib/vertex.js';
 import { googleConfigured, getProjectId } from '../lib/googleAuth.js';
-import { extractPdfText } from '../lib/pdf.js';
+import { extractResumeContent } from '../lib/pdf.js';
 
 const router = Router();
 
@@ -28,7 +28,7 @@ function profileSummary(u, extra = '') {
   ].filter(Boolean).join('\n');
 }
 
-async function runFeature({ feature, promptKey, userId, buildContent }) {
+async function runFeature({ feature, promptKey, userId, buildContent, imageParts }) {
   const settings = await getAiSettings();
   const systemPrompt = settings.prompts?.[promptKey];
   const projectId = settings.vertexProjectId || getProjectId();
@@ -44,7 +44,7 @@ async function runFeature({ feature, promptKey, userId, buildContent }) {
   try {
     if (!settings.enabled) throw new Error('AI is disabled in admin settings.');
     if (!projectId || !googleConfigured()) throw new Error('AI not configured — set the Vertex project and service-account credentials.');
-    const { text, parsed } = await generateJson({ projectId, location, model, systemPrompt, userContent });
+    const { text, parsed } = await generateJson({ projectId, location, model, systemPrompt, userContent, imageParts });
     log.output = text;
     log.parsed = parsed;
     log.status = parsed ? 'ok' : 'error';
@@ -65,16 +65,29 @@ async function runFeature({ feature, promptKey, userId, buildContent }) {
 router.post('/ats', userAuth, async (req, res) => {
   try {
     let resumeText = (req.body?.resumeText || '').slice(0, 12000);
-    // If no text supplied, parse the user's saved CV PDF.
+    let imagePart = null;
+    // If no text supplied, read the user's saved CV — a PDF gets text-extracted,
+    // an image (common for students without a proper PDF) is handed to Gemini
+    // directly as a vision input instead of silently yielding empty text.
     if (!resumeText) {
       const u = await User.findById(req.user.sub).lean();
-      if (u?.cvUrl) resumeText = await extractPdfText(u.cvUrl);
+      if (u?.cvUrl) {
+        const content = await extractResumeContent(u.cvUrl);
+        resumeText = content.text;
+        imagePart = content.imagePart;
+      }
     }
+    const note = resumeText
+      ? `\nResume text (extracted):\n${resumeText}`
+      : imagePart
+        ? '\nA resume image is attached — read it directly to evaluate content, formatting and ATS-friendliness.'
+        : '\n(No resume uploaded — evaluate profile only and advise uploading a resume.)';
     const result = await runFeature({
       feature: 'atsScore',
       promptKey: 'atsScore',
       userId: req.user.sub,
-      buildContent: (u) => profileSummary(u, resumeText ? `\nResume text (extracted):\n${resumeText}` : '\n(No resume uploaded — evaluate profile only and advise uploading a resume.)'),
+      buildContent: (u) => profileSummary(u, note),
+      imageParts: imagePart ? [imagePart] : [],
     });
     res.json(result);
   } catch (e) {
